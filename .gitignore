@@ -1,0 +1,11 @@
+config.yaml
+bot.db
+bot.db-journal
+bot.db-wal
+bot.db-shm
+worldbook.md
+*history*.json
+.env
+venv/
+__pycache__/
+*.pyc
