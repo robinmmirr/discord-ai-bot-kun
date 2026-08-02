@@ -38,6 +38,16 @@ def get_connection() -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS impressions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            note TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
     return conn
 
@@ -152,6 +162,22 @@ def search_messages(conn: sqlite3.Connection, query: str, limit: int = 10) -> li
     return [
         {"author": r[0], "content": r[1], "channel": r[2], "timestamp": r[3]} for r in rows
     ]
+
+
+def save_impression(conn: sqlite3.Connection, user_id: str, note: str) -> None:
+    conn.execute(
+        "INSERT INTO impressions (user_id, note, created_at) VALUES (?, ?, ?)",
+        (user_id, note, datetime.datetime.now().isoformat()),
+    )
+    conn.commit()
+
+
+def get_impressions(conn: sqlite3.Connection, user_id: str, limit: int = 10) -> list[str]:
+    rows = conn.execute(
+        "SELECT note FROM impressions WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+    return [r[0] for r in rows]
 
 
 def stage_for_score(score: int, stages: list[dict]) -> dict:
