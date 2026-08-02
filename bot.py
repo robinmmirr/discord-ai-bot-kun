@@ -56,25 +56,28 @@ CONTEXT_TOOLS = [
             "description": (
                 "Retrieve background context before answering — this keeps your default "
                 "context small and lets you pull in only what's relevant. Use scope "
-                "'conversation' to search past chat messages for a topic (needs a query). "
-                "Use scope 'worldbook' to recall community history and running jokes "
-                "(query optional — omit it to get everything). Use scope 'impression' to "
-                "recall what you remember about the person you're currently talking to "
-                "(no query needed)."
+                "'conversation' to search past chat messages for a TOPIC/keyword (needs a "
+                "query). Use scope 'author_history' when the question is about a specific "
+                "PERSON's own messages/style/catchphrases rather than a topic — e.g. 'what "
+                "does X usually say' (query = that person's name). Use scope 'worldbook' to "
+                "recall community history and running jokes (query optional — omit it to get "
+                "everything). Use scope 'impression' to recall what you remember about the "
+                "person you're currently talking to (no query needed)."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "scope": {
                         "type": "string",
-                        "enum": ["conversation", "worldbook", "impression"],
+                        "enum": ["conversation", "author_history", "worldbook", "impression"],
                         "description": "Which kind of context to retrieve.",
                     },
                     "query": {
                         "type": "string",
                         "description": (
-                            "Keyword/topic to search for. Required for 'conversation', "
-                            "optional for 'worldbook', unused for 'impression'."
+                            "For 'conversation': the keyword/topic to search for. For "
+                            "'author_history': that person's display name. Optional for "
+                            "'worldbook'. Unused for 'impression'."
                         ),
                     },
                 },
@@ -122,6 +125,17 @@ def make_tool_executor(user_id: str):
                 results = db.search_messages(conn, query, limit=10)
                 if not results:
                     return "No matching messages found."
+                return "\n".join(
+                    f"[#{r['channel']} — {r['timestamp']}] {r['author']}: {r['content']}"
+                    for r in results
+                )
+
+            if scope == "author_history":
+                if not query:
+                    return "A person's name is required for the 'author_history' scope."
+                results = db.get_messages_by_author(conn, query, limit=30)
+                if not results:
+                    return f"No messages found from anyone matching '{query}'."
                 return "\n".join(
                     f"[#{r['channel']} — {r['timestamp']}] {r['author']}: {r['content']}"
                     for r in results

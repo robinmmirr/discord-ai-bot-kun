@@ -164,6 +164,25 @@ def search_messages(conn: sqlite3.Connection, query: str, limit: int = 10) -> li
     ]
 
 
+def get_messages_by_author(conn: sqlite3.Connection, author_name: str, limit: int = 30) -> list[dict]:
+    """Fetch recent messages FROM a specific person — for questions like "what does
+    X usually say" or "what are X's catchphrases", where the point is to sample that
+    person's own messages, not to keyword-search message content. `search_messages`
+    intentionally excludes author-name matches (see its docstring), so this is the
+    dedicated path for author-scoped lookups. Case-insensitive substring match on the
+    display name, since Discord names are inconsistent about capitalization."""
+    rows = conn.execute(
+        """
+        SELECT author, content, channel, timestamp FROM messages_fts
+        WHERE author LIKE ? ORDER BY rowid DESC LIMIT ?
+        """,
+        (f"%{author_name}%", limit),
+    ).fetchall()
+    return [
+        {"author": r[0], "content": r[1], "channel": r[2], "timestamp": r[3]} for r in rows
+    ]
+
+
 def save_impression(conn: sqlite3.Connection, user_id: str, note: str) -> None:
     conn.execute(
         "INSERT INTO impressions (user_id, note, created_at) VALUES (?, ?, ?)",
