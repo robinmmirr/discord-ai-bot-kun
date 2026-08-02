@@ -38,7 +38,9 @@ async def export_channel(
         print(f"Connected as {client.user}. Fetching channel {channel_id}...")
         try:
             channel = client.get_channel(channel_id) or await client.fetch_channel(channel_id)
-            print(f"Found channel: #{getattr(channel, 'name', channel_id)}. Downloading history...")
+            channel_name = getattr(channel, "name", str(channel_id))
+            guild_id = channel.guild.id if getattr(channel, "guild", None) else None
+            print(f"Found channel: #{channel_name}. Downloading history...")
             count = 0
             async for msg in channel.history(limit=limit, after=since, oldest_first=True):
                 if msg.author.bot:
@@ -51,6 +53,10 @@ async def export_channel(
                         "author_id": str(msg.author.id),
                         "content": msg.content,
                         "timestamp": msg.created_at.isoformat(),
+                        "channel": channel_name,
+                        "message_id": str(msg.id),
+                        "channel_id": str(channel_id),
+                        "guild_id": str(guild_id) if guild_id else None,
                     }
                 )
                 count += 1

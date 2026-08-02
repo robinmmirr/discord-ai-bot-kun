@@ -62,7 +62,10 @@ CONTEXT_TOOLS = [
                 "does X usually say' (query = that person's name). Use scope 'worldbook' to "
                 "recall community history and running jokes (query optional — omit it to get "
                 "everything). Use scope 'impression' to recall what you remember about the "
-                "person you're currently talking to (no query needed)."
+                "person you're currently talking to (no query needed). Results for "
+                "'conversation' and 'author_history' may include a Discord link in "
+                "parentheses after each message — when you cite a specific message in your "
+                "reply, include that link so the user can jump straight to it."
             ),
             "parameters": {
                 "type": "object",
@@ -114,6 +117,11 @@ def make_tool_executor(user_id: str):
     'impression' and 'remember_about_user' operate on the right person without
     the model having to know or pass around a Discord user ID."""
 
+    def format_result_row(r: dict) -> str:
+        link = db.jump_link(r)
+        link_part = f" ({link})" if link else ""
+        return f"[#{r['channel']} — {r['timestamp']}] {r['author']}: {r['content']}{link_part}"
+
     def execute_tool(name: str, args: dict) -> str:
         if name == "gather_context":
             scope = args.get("scope")
@@ -125,10 +133,7 @@ def make_tool_executor(user_id: str):
                 results = db.search_messages(conn, query, limit=10)
                 if not results:
                     return "No matching messages found."
-                return "\n".join(
-                    f"[#{r['channel']} — {r['timestamp']}] {r['author']}: {r['content']}"
-                    for r in results
-                )
+                return "\n".join(format_result_row(r) for r in results)
 
             if scope == "author_history":
                 if not query:
@@ -136,10 +141,7 @@ def make_tool_executor(user_id: str):
                 results = db.get_messages_by_author(conn, query, limit=30)
                 if not results:
                     return f"No messages found from anyone matching '{query}'."
-                return "\n".join(
-                    f"[#{r['channel']} — {r['timestamp']}] {r['author']}: {r['content']}"
-                    for r in results
-                )
+                return "\n".join(format_result_row(r) for r in results)
 
             if scope == "worldbook":
                 if not worldbook_text:
@@ -203,6 +205,9 @@ class CompanionBot(discord.Client):
                 message.content,
                 getattr(message.channel, "name", "DM"),
                 message.created_at.isoformat(),
+                message_id=str(message.id),
+                channel_id=str(message.channel.id),
+                guild_id=str(message.guild.id) if message.guild else None,
             )
 
         if message.content.strip() == "!usage":
@@ -239,7 +244,16 @@ class CompanionBot(discord.Client):
         user_text = message.content
         for mention in message.mentions:
             if mention.id == self.user.id:
+                # The bot's own mention carries no information once we know we're
+                # being addressed — strip it entirely.
                 user_text = user_text.replace(f"<@{mention.id}>", "").replace(f"<@!{mention.id}>", "")
+            else:
+                # Other users' mentions render as raw IDs (<@123...>) in message.content,
+                # which the model can't map to a name — swap in the display name so
+                # e.g. "author_history" lookups have something usable to search for.
+                user_text = user_text.replace(
+                    f"<@{mention.id}>", f"@{mention.display_name}"
+                ).replace(f"<@!{mention.id}>", f"@{mention.display_name}")
         for role in message.guild.me.roles if message.guild and message.guild.me else []:
             user_text = user_text.replace(f"<@&{role.id}>", "")
         user_text = user_text.strip()

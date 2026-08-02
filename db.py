@@ -34,10 +34,26 @@ def get_connection() -> sqlite3.Connection:
     conn.execute(
         """
         CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-            author, content, channel, timestamp
+            author, content, channel, timestamp,
+            message_id UNINDEXED, channel_id UNINDEXED, guild_id UNINDEXED
         )
         """
     )
+    # Migration: messages_fts predates the message_id/channel_id/guild_id columns
+    # (added to support Discord jump links). FTS5 tables created before this change
+    # need to be dropped and recreated — CREATE ... IF NOT EXISTS is a no-op against
+    # an existing table with the old schema, so it won't add the columns on its own.
+    existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(messages_fts)")}
+    if "message_id" not in existing_columns:
+        conn.execute("DROP TABLE messages_fts")
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE messages_fts USING fts5(
+                author, content, channel, timestamp,
+                message_id UNINDEXED, channel_id UNINDEXED, guild_id UNINDEXED
+            )
+            """
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS impressions (
@@ -114,12 +130,32 @@ def get_total_token_usage(conn: sqlite3.Connection) -> dict:
     }
 
 
-def log_message(conn: sqlite3.Connection, author: str, content: str, channel: str, timestamp: str) -> None:
+def log_message(
+    conn: sqlite3.Connection,
+    author: str,
+    content: str,
+    channel: str,
+    timestamp: str,
+    message_id: str | None = None,
+    channel_id: str | None = None,
+    guild_id: str | None = None,
+) -> None:
     conn.execute(
-        "INSERT INTO messages_fts (author, content, channel, timestamp) VALUES (?, ?, ?, ?)",
-        (author, content, channel, timestamp),
+        """
+        INSERT INTO messages_fts (author, content, channel, timestamp, message_id, channel_id, guild_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (author, content, channel, timestamp, message_id, channel_id, guild_id),
     )
     conn.commit()
+
+
+def jump_link(row: dict) -> str | None:
+    """Build a clickable Discord message link from a search-result row, if it has
+    the IDs needed (older imported/logged rows from before jump-link support won't)."""
+    if row.get("guild_id") and row.get("channel_id") and row.get("message_id"):
+        return f"https://discord.com/channels/{row['guild_id']}/{row['channel_id']}/{row['message_id']}"
+    return None
 
 
 STOPWORDS = {
@@ -153,14 +189,19 @@ def search_messages(conn: sqlite3.Connection, query: str, limit: int = 10) -> li
     fts_query = " OR ".join(escaped_terms)
     rows = conn.execute(
         """
-        SELECT author, content, channel, timestamp FROM messages_fts
+        SELECT author, content, channel, timestamp, message_id, channel_id, guild_id
+        FROM messages_fts
         WHERE messages_fts MATCH ?
         ORDER BY rowid DESC LIMIT ?
         """,
         (fts_query, limit),
     ).fetchall()
     return [
-        {"author": r[0], "content": r[1], "channel": r[2], "timestamp": r[3]} for r in rows
+        {
+            "author": r[0], "content": r[1], "channel": r[2], "timestamp": r[3],
+            "message_id": r[4], "channel_id": r[5], "guild_id": r[6],
+        }
+        for r in rows
     ]
 
 
@@ -173,13 +214,18 @@ def get_messages_by_author(conn: sqlite3.Connection, author_name: str, limit: in
     display name, since Discord names are inconsistent about capitalization."""
     rows = conn.execute(
         """
-        SELECT author, content, channel, timestamp FROM messages_fts
+        SELECT author, content, channel, timestamp, message_id, channel_id, guild_id
+        FROM messages_fts
         WHERE author LIKE ? ORDER BY rowid DESC LIMIT ?
         """,
         (f"%{author_name}%", limit),
     ).fetchall()
     return [
-        {"author": r[0], "content": r[1], "channel": r[2], "timestamp": r[3]} for r in rows
+        {
+            "author": r[0], "content": r[1], "channel": r[2], "timestamp": r[3],
+            "message_id": r[4], "channel_id": r[5], "guild_id": r[6],
+        }
+        for r in rows
     ]
 
 
